@@ -2495,3 +2495,28 @@ fn database_user_lifecycle_privilege_diff_roles_and_ownership_guard() {
     ));
     assert_eq!(login["rows"], json!([[0]]));
 }
+
+#[test]
+fn transaction_control_statements_run_in_one_batch() {
+    let mut plugin = Plugin::with_scratch_database();
+    plugin.reset_table("txn_batch", "id INT NOT NULL");
+
+    // Reported in #44: an empty transaction block failed with error 3981.
+    plugin.execute("BEGIN TRANSACTION; COMMIT TRANSACTION");
+
+    plugin.execute(format!(
+        "BEGIN TRANSACTION; INSERT INTO [{TEST_SCHEMA}].[txn_batch] (id) VALUES (1); COMMIT TRANSACTION"
+    ));
+    let committed = plugin.execute(format!(
+        "SELECT id, @@TRANCOUNT AS open_transactions FROM [{TEST_SCHEMA}].[txn_batch]"
+    ));
+    assert_eq!(committed["rows"], json!([[1, 0]]));
+
+    plugin.execute(format!(
+        "BEGIN TRANSACTION; INSERT INTO [{TEST_SCHEMA}].[txn_batch] (id) VALUES (2); ROLLBACK TRANSACTION"
+    ));
+    let rolled_back = plugin.execute(format!(
+        "SELECT COUNT(*) AS n FROM [{TEST_SCHEMA}].[txn_batch]"
+    ));
+    assert_eq!(rolled_back["rows"], json!([[1]]));
+}
